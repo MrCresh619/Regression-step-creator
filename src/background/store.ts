@@ -21,7 +21,7 @@ const applyRecordingCommand = (
   switch (command) {
     case 'start':
       if (currentState.isRecording) {
-        return { ...currentState, isPaused: false, updatedAt: timestamp };
+        return currentState;
       }
 
       return {
