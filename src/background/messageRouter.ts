@@ -7,6 +7,7 @@ import type { ExtensionRequestMessage, ExtensionResponseMessage } from '@/shared
 import { isExtensionRequestMessage, MessageType } from '@/shared/messaging';
 
 let recorderState: RecorderState = createInitialRecorderState();
+let hydrationPromise: Promise<void> | null = null;
 
 type BrowserRuntime = Pick<typeof browser, 'runtime'>;
 type RuntimeMessageSender = Parameters<typeof browser.runtime.onMessage.addListener>[0] extends (
@@ -16,9 +17,7 @@ type RuntimeMessageSender = Parameters<typeof browser.runtime.onMessage.addListe
   ? TSender
   : never;
 
-export const initializeMessageRouter = async (browserApi: BrowserRuntime): Promise<void> => {
-  recorderState = await getRecorderState();
-
+export const initializeMessageRouter = (browserApi: BrowserRuntime): void => {
   browserApi.runtime.onMessage.addListener(
     (
       message: unknown,
@@ -31,6 +30,17 @@ export const initializeMessageRouter = async (browserApi: BrowserRuntime): Promi
       return handleExtensionMessage(message, sender);
     },
   );
+
+  hydrationPromise = hydrateRecorderState();
+};
+
+const hydrateRecorderState = async (): Promise<void> => {
+  recorderState = await getRecorderState();
+};
+
+const waitForRecorderStateHydration = async (): Promise<void> => {
+  hydrationPromise ??= hydrateRecorderState();
+  await hydrationPromise;
 };
 
 const handleExtensionMessage = async (
@@ -48,6 +58,7 @@ const handleExtensionMessage = async (
       };
 
     case MessageType.ContentScriptReady:
+      await waitForRecorderStateHydration();
       recorderState = {
         ...recorderState,
         activeTabId: sender.tab?.id ?? recorderState.activeTabId,
@@ -57,6 +68,7 @@ const handleExtensionMessage = async (
       return undefined;
 
     case MessageType.RecorderStatusRequest:
+      await waitForRecorderStateHydration();
       return {
         type: MessageType.RecorderStatusResponse,
         payload: {

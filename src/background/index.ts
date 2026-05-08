@@ -2,6 +2,6 @@ import { browser } from 'wxt/browser';
 
 import { initializeMessageRouter } from './messageRouter';
 
-export const startBackgroundWorker = async (): Promise<void> => {
-  await initializeMessageRouter(browser);
+export const startBackgroundWorker = (): void => {
+  initializeMessageRouter(browser);
 };
