@@ -1,4 +1,5 @@
 export const StorageKey = {
+  RecordingState: 'recorder-state',
   RecorderState: 'recorder-state',
 } as const;
 

@@ -1,7 +1,7 @@
 import localforage from 'localforage';
 
-import type { RecorderState } from '@/core/recorder';
-import { createInitialRecorderState } from '@/core/recorder';
+import type { RecordingState } from '@/shared/types';
+import { createInitialRecordingState } from '@/shared/types';
 import { StorageKey } from './storageKeys';
 
 const database = localforage.createInstance({
@@ -10,19 +10,40 @@ const database = localforage.createInstance({
   description: 'Persistent state for Regression Test Recorder.',
 });
 
-export const getRecorderState = async (): Promise<RecorderState> => {
-  const storedState = await database.getItem<RecorderState>(StorageKey.RecorderState);
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const normalizeRecordingState = (value: unknown): RecordingState | null => {
+  if (!isRecord(value) || typeof value.isRecording !== 'boolean') {
+    return null;
+  }
+
+  const currentSessionId = typeof value.currentSessionId === 'string' ? value.currentSessionId : null;
+
+  return {
+    isRecording: value.isRecording,
+    isPaused: value.isRecording && typeof value.isPaused === 'boolean' ? value.isPaused : false,
+    currentSessionId: value.isRecording ? currentSessionId : null,
+    updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : Date.now(),
+  };
+};
+
+export const getRecordingState = async (): Promise<RecordingState> => {
+  const storedState = normalizeRecordingState(await database.getItem<unknown>(StorageKey.RecordingState));
 
   if (storedState) {
     return storedState;
   }
 
-  const initialState = createInitialRecorderState();
-  await database.setItem(StorageKey.RecorderState, initialState);
+  const initialState = createInitialRecordingState();
+  await database.setItem(StorageKey.RecordingState, initialState);
   return initialState;
 };
 
-export const setRecorderState = async (state: RecorderState): Promise<RecorderState> => {
-  await database.setItem(StorageKey.RecorderState, state);
+export const setRecordingState = async (state: RecordingState): Promise<RecordingState> => {
+  await database.setItem(StorageKey.RecordingState, state);
   return state;
 };
+
+export const getRecorderState = getRecordingState;
+export const setRecorderState = setRecordingState;

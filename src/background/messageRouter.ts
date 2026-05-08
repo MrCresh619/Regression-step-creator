@@ -1,15 +1,13 @@
 import type { browser } from 'wxt/browser';
 
-import type { RecorderState } from '@/core/recorder';
-import { createInitialRecorderState } from '@/core/recorder';
-import { getRecorderState, setRecorderState } from '@/storage/localDatabase';
-import type { ExtensionRequestMessage, ExtensionResponseMessage } from '@/shared/messaging';
-import { isExtensionRequestMessage, MessageType } from '@/shared/messaging';
-
-let recorderState: RecorderState = createInitialRecorderState();
-let hydrationPromise: Promise<void> | null = null;
+import type { RecordingStore } from './store';
+import { createRecordingStore } from './store';
+import type { ExtensionRequestMessage, ExtensionResponseMessage } from '@/shared/messages';
+import { isExtensionRequestMessage, MessageType } from '@/shared/messages';
 
 type BrowserRuntime = Pick<typeof browser, 'runtime'>;
+type BrowserTabs = Pick<typeof browser, 'tabs'>;
+type BrowserApi = BrowserRuntime & BrowserTabs;
 type RuntimeMessageSender = Parameters<typeof browser.runtime.onMessage.addListener>[0] extends (
   message: unknown,
   sender: infer TSender,
@@ -17,7 +15,11 @@ type RuntimeMessageSender = Parameters<typeof browser.runtime.onMessage.addListe
   ? TSender
   : never;
 
-export const initializeMessageRouter = (browserApi: BrowserRuntime): void => {
+let recordingStore: RecordingStore | null = null;
+
+export const initializeMessageRouter = (browserApi: BrowserApi): void => {
+  recordingStore = createRecordingStore(browserApi);
+
   browserApi.runtime.onMessage.addListener(
     (
       message: unknown,
@@ -30,23 +32,22 @@ export const initializeMessageRouter = (browserApi: BrowserRuntime): void => {
       return handleExtensionMessage(message, sender);
     },
   );
-
-  hydrationPromise = hydrateRecorderState();
 };
 
-const hydrateRecorderState = async (): Promise<void> => {
-  recorderState = await getRecorderState();
-};
+const getRecordingStore = (): RecordingStore => {
+  if (!recordingStore) {
+    throw new Error('Recording store has not been initialized.');
+  }
 
-const waitForRecorderStateHydration = async (): Promise<void> => {
-  hydrationPromise ??= hydrateRecorderState();
-  await hydrationPromise;
+  return recordingStore;
 };
 
 const handleExtensionMessage = async (
   message: ExtensionRequestMessage,
   sender: RuntimeMessageSender,
 ): Promise<ExtensionResponseMessage | undefined> => {
+  const store = getRecordingStore();
+
   switch (message.type) {
     case MessageType.Ping:
       return {
@@ -58,23 +59,21 @@ const handleExtensionMessage = async (
       };
 
     case MessageType.ContentScriptReady:
-      await waitForRecorderStateHydration();
-      recorderState = {
-        ...recorderState,
-        activeTabId: sender.tab?.id ?? recorderState.activeTabId,
-        updatedAt: Date.now(),
-      };
-      await setRecorderState(recorderState);
+      if (typeof sender.tab?.id === 'number') {
+        await store.notifyTab(sender.tab.id);
+      }
       return undefined;
 
-    case MessageType.RecorderStatusRequest:
-      await waitForRecorderStateHydration();
+    case MessageType.RecordingStateRequest:
       return {
-        type: MessageType.RecorderStatusResponse,
-        payload: {
-          isRecording: recorderState.isRecording,
-          activeTabId: recorderState.activeTabId,
-        },
+        type: MessageType.RecordingStateResponse,
+        payload: await store.getState(),
+      };
+
+    case MessageType.RecordingCommandRequest:
+      return {
+        type: MessageType.RecordingStateResponse,
+        payload: await store.dispatch(message.payload.command),
       };
   }
 };
