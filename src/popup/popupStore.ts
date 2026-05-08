@@ -1,24 +1,36 @@
 import { create } from 'zustand';
 
-import type { PongMessage, RecorderStatusResponseMessage } from '@/shared/messaging';
-import { MessageType } from '@/shared/messaging';
 import { sendRuntimeMessage } from '@/shared/browser';
+import type { PongMessage, RecordingStateResponseMessage } from '@/shared/messages';
+import { MessageType } from '@/shared/messages';
+import type { RecordingCommand, RecordingState } from '@/shared/types';
 
 type ConnectionState = 'idle' | 'checking' | 'connected' | 'error';
+type RecorderActionState = 'idle' | 'updating';
 
 type PopupState = {
   connectionState: ConnectionState;
+  actionState: RecorderActionState;
   lastBackgroundResponseAt: number | null;
-  recorderStatus: RecorderStatusResponseMessage['payload'] | null;
+  recordingState: RecordingState | null;
   errorMessage: string | null;
   checkConnection: () => Promise<void>;
-  loadRecorderStatus: () => Promise<void>;
+  loadRecordingState: () => Promise<void>;
+  dispatchRecordingCommand: (command: RecordingCommand) => Promise<void>;
+};
+
+const recordingStateFallback: RecordingState = {
+  isRecording: false,
+  isPaused: false,
+  currentSessionId: null,
+  updatedAt: 0,
 };
 
 export const usePopupStore = create<PopupState>((set) => ({
   connectionState: 'idle',
+  actionState: 'idle',
   lastBackgroundResponseAt: null,
-  recorderStatus: null,
+  recordingState: null,
   errorMessage: null,
 
   checkConnection: async () => {
@@ -47,16 +59,42 @@ export const usePopupStore = create<PopupState>((set) => ({
     });
   },
 
-  loadRecorderStatus: async () => {
-    const result = await sendRuntimeMessage<RecorderStatusResponseMessage>({
-      type: MessageType.RecorderStatusRequest,
+  loadRecordingState: async () => {
+    const result = await sendRuntimeMessage<RecordingStateResponseMessage>({
+      type: MessageType.RecordingStateRequest,
     });
 
-    if (!result.ok || result.response?.type !== MessageType.RecorderStatusResponse) {
-      set({ errorMessage: result.error ?? 'Unable to load recorder status.' });
+    if (!result.ok || result.response?.type !== MessageType.RecordingStateResponse) {
+      set({ errorMessage: result.error ?? 'Unable to load recording state.' });
       return;
     }
 
-    set({ recorderStatus: result.response.payload, errorMessage: null });
+    set({ recordingState: result.response.payload, errorMessage: null });
+  },
+
+  dispatchRecordingCommand: async (command: RecordingCommand) => {
+    set({ actionState: 'updating', errorMessage: null });
+
+    const result = await sendRuntimeMessage<RecordingStateResponseMessage>({
+      type: MessageType.RecordingCommandRequest,
+      payload: { command },
+    });
+
+    if (!result.ok || result.response?.type !== MessageType.RecordingStateResponse) {
+      set({
+        actionState: 'idle',
+        errorMessage: result.error ?? `Unable to ${command} recording.`,
+      });
+      return;
+    }
+
+    set({
+      actionState: 'idle',
+      recordingState: result.response.payload,
+      errorMessage: null,
+    });
   },
 }));
+
+export const selectRecordingState = (state: PopupState): RecordingState =>
+  state.recordingState ?? recordingStateFallback;
